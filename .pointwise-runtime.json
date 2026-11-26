@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "kind": "api",
+  "setup": [],
+  "start": ["sh", "-c", "test \"$1\" = 127.0.0.1 && exec python3 -B -m control.http_api --db \"${POINTWISE_GUIDE_DB:-guide.sqlite3}\" --port \"$2\"", "guide", "${POINTWISE_HOST}", "${POINTWISE_PORT}"],
+  "readiness_path": "/session?session=readiness",
+  "verify": ["sh", "-c", "python3 -B check_project.py && python3 -B incident.py"],
+  "demo": ["python3", "-B", "demo.py"]
+}

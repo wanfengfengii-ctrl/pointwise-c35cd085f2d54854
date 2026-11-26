@@ -1,0 +1,15 @@
+{
+  "publish": {
+    "session": "morning",
+    "layout": {
+      "ports": ["S", "A", "B", "T"],
+      "start": "S",
+      "listener": "T",
+      "allowed": [["S", "A", "S"], ["S", "B", "S"], ["A", "T", "A"], ["A", "B", "A"], ["B", "T", "B"], ["B", "A", "B"]],
+      "initial": [["S", "A"], ["A", "T"], ["A", "B"]]
+    }
+  },
+  "input": "S",
+  "change": {"session": "morning", "operation": "K", "target": [["S", "B"], ["B", "T"], ["B", "A"]]},
+  "close": {"session": "morning", "close_id": "handoff-1"}
+}
