@@ -1,8 +1,12 @@
+import json
+
 from endpoint.commands import get_command
 from endpoint.commit_log import append_commit
 from endpoint.outcomes import StepOutcome, read_commit_outcome
 from endpoint.store import write_transaction
+from topology.layout import build_layout
 from topology.ports import BusinessError
+from topology.reachability import assess_paths
 
 
 def initialize_wiring(db):
@@ -35,13 +39,27 @@ def apply_local_command(db, session, operation, step):
         command = get_command(db, session, operation, step)
         if command is None:
             raise BusinessError('UNKNOWN_STEP', 'Endpoint has no such step', 404)
-        actual = read_actual_wiring(db, session)
         previous = read_commit_outcome(db, session, operation, step)
-        expected_after = (command.expected - command.removed) | command.added
-        if previous is not None and actual == expected_after:
+        if previous is not None:
+            # A real commit is the permanent endpoint receipt: redelivery always
+            # reclaims the original outcome and sequence, even after later
+            # replacement wiring has moved the live edges elsewhere.
             return previous
-        if previous is not None or actual != command.expected:
+        order = db.execute('''SELECT status, reason FROM orders
+            WHERE session = ? AND operation = ?''', (session, operation)).fetchone()
+        if order is not None and order['status'] in ('completed', 'rejected'):
+            # The case is already settled (e.g. rejected/SUPERSEDED by an
+            # explicit replacement). A late step that was never actually
+            # committed must not move live wiring any more.
+            reason = order['reason'] or 'SETTLED_OPERATION'
+            return StepOutcome(session, operation, step, command.owner, 'rejected', reason=reason)
+        actual = read_actual_wiring(db, session)
+        if actual != command.expected:
             return StepOutcome(session, operation, step, command.owner, 'rejected', reason='STALE_WIRING')
+        candidate = (actual - command.removed) | command.added
+        rejection = _unsafe_candidate_reason(db, session, candidate)
+        if rejection is not None:
+            return StepOutcome(session, operation, step, command.owner, 'rejected', reason=rejection)
         for source, destination in sorted(command.removed):
             deleted = db.execute('''DELETE FROM wiring WHERE session = ? AND owner = ?
                 AND source = ? AND destination = ?''', (session, command.owner, source, destination))
@@ -52,3 +70,18 @@ def apply_local_command(db, session, operation, step):
         if command.removed or command.added:
             sequence = append_commit(db, command, command.removed, command.added)
         return StepOutcome(session, operation, step, command.owner, 'applied', sequence)
+
+
+def _unsafe_candidate_reason(db, session, candidate):
+    """Defence in depth for the every-commit unique-sound/no-feedback rule."""
+    row = db.execute('SELECT reference FROM sessions WHERE session = ?', (session,)).fetchone()
+    if row is None or row['reference'] is None:
+        return None
+    stored = db.execute('SELECT definition FROM publications WHERE session = ? AND reference = ?',
+                       (session, row['reference'])).fetchone()
+    if stored is None:
+        return None
+    layout = build_layout(json.loads(stored['definition']))
+    state = assess_paths(layout, candidate).state
+    return {'feedback': 'FEEDBACK_LOOP', 'silent': 'NO_LIVE_PATH',
+            'duplicate': 'DUPLICATE_LIVE_PATH'}.get(state)

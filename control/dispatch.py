@@ -1,6 +1,6 @@
 from control.orders import admit_order, finish_order, get_order, matching_order, update_order_progress
 from control.preview import open_layout, preview_change
-from control.route_search import RouteStep, find_route_plan
+from control.route_search import RouteStep, find_route_plan  # noqa: F401
 from endpoint.commands import WiringCommand, accept_command, get_command
 from endpoint.local_wiring import apply_local_command, read_actual_wiring
 from endpoint.outcomes import read_commit_outcome
@@ -53,11 +53,6 @@ def _prepare_next(db, session, operation):
             return None
 
         next_step = plan.steps[0]
-        additions = order.target - actual
-        if order.progress == 0 and len(additions) == 1:
-            edge, = additions
-            owner = next(rule.owner for rule in layout.rules if rule.edge == edge)
-            next_step = RouteStep(owner, frozenset(), additions)
         command = WiringCommand(session, operation, order.progress + 1, next_step.owner,
                                 actual, next_step.removed, next_step.added)
         accepted = accept_command(db, layout, command)
